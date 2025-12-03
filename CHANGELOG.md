@@ -95,6 +95,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Port 80 WebSocket support now works before SSL is configured
+- Port 80 WebSocket support continues working even after SSL is installed
+- V2Ray reverse proxy (VMESS, VLESS, XHTTP) now works correctly through NGINX on all ports
+- Added missing WebSocket upgrade headers for V2Ray endpoints
+- SNI and TLS handling improved for port 443 WebSocket connections
+- All V2Ray endpoints now accessible on ports 80, 443, 8080, and 8443
+
+### Enhanced
+- Complete uninstall script with interactive options to remove:
+  - V2Ray binary (optional)
+  - SSL certificates (optional)
+  - NGINX package (optional)
+  - Python dependencies
+  - Firewall rules
+- Better user feedback during uninstall process
+- NGINX configuration now includes WebSocket support on all ports in both HTTP-only and SSL modes
+
 ### Planned Features
 - Support for additional Linux distributions (CentOS, Fedora)
 - Web-based management panel

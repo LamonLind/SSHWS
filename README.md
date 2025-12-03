@@ -460,6 +460,38 @@ sudo ufw allow 443/tcp
 sudo netstat -tuln | grep -E ':(80|443|8080|8443)'
 ```
 
+**5. WebSocket Not Working on Port 80**
+```bash
+# Check if NGINX is proxying WebSocket correctly
+curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  http://your-domain.com/ssh-ws
+
+# Verify NGINX configuration includes WebSocket on port 80
+grep -A 10 "listen 80" /etc/nginx/conf.d/sshws.conf | grep "location /ssh-ws"
+
+# Test V2Ray endpoint
+curl -i http://your-domain.com/vmess
+
+# Restart NGINX if needed
+sudo systemctl restart nginx
+```
+
+**6. V2Ray Not Working Through NGINX**
+```bash
+# Check if V2Ray services are running
+sudo systemctl status v2ray-vmess v2ray-vless xhttp
+
+# Verify V2Ray is listening on internal ports
+sudo netstat -tuln | grep -E ':(10001|10002|10003)'
+
+# Check NGINX is forwarding to V2Ray
+sudo tail -f /var/log/nginx/error.log
+
+# Test WebSocket upgrade headers
+curl -i -H "Upgrade: websocket" -H "Connection: Upgrade" \
+  https://your-domain.com/vmess
+```
+
 ### Getting Help
 
 If you encounter issues:
