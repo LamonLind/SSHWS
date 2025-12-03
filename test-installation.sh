@@ -121,7 +121,14 @@ test_ports() {
     )
     
     for port in "${ports[@]}"; do
-        if netstat -tuln | grep -q ":$port "; then
+        # Try ss first, fallback to netstat if not available
+        if command -v ss &>/dev/null; then
+            if ss -tuln | grep -q ":$port "; then
+                print_pass "Port listening: $port"
+            else
+                print_fail "Port not listening: $port"
+            fi
+        elif netstat -tuln | grep -q ":$port "; then
             print_pass "Port listening: $port"
         else
             print_fail "Port not listening: $port"

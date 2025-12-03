@@ -1695,9 +1695,10 @@ main() {
     echo ""
     
     # Save installation info
+    local server_ip=$(hostname -I | awk '{print $1}' || echo "Unknown")
     cat > "$DATA_DIR/install_info.txt" << EOF
 Installation Date: $(date)
-Server IP: $(curl -s ifconfig.me)
+Server IP: $server_ip
 Version: $SCRIPT_VERSION
 OS: $OS $OS_VERSION
 EOF
