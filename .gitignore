@@ -1,0 +1,36 @@
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Backup files
+*.backup
+*.bak
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Test files
+test/
+tmp/
+
+# Build artifacts
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+
+# User data (sensitive)
+users.db
+*.key
+*.pem
+*.crt
