@@ -617,7 +617,83 @@ configure_domain() {
     # Save domain
     echo "$domain" > "$DOMAIN_FILE"
     
-    # Create NGINX configuration with WebSocket support
+    # Check if SSL certificate already exists
+    if [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]]; then
+        # SSL exists, create full config with HTTPS
+        create_nginx_config_with_ssl "$domain"
+    else
+        # SSL doesn't exist, create HTTP-only config for ACME challenge
+        create_nginx_config_http_only "$domain"
+    fi
+    
+    # Test NGINX configuration
+    nginx -t > /dev/null 2>&1 || {
+        print_error "NGINX configuration test failed"
+        return 1
+    }
+    
+    # Reload NGINX to apply configuration
+    systemctl reload nginx
+    
+    print_success "Domain configured"
+    return 0
+}
+
+create_nginx_config_http_only() {
+    local domain=$1
+    
+    # Create HTTP-only NGINX configuration for ACME challenge
+    cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
+# HTTP Server - Handle ACME challenge and serve content
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain;
+
+    # Root directory
+    root /var/www/html;
+    index index.html index.htm;
+
+    # ACME challenge for Let's Encrypt
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        allow all;
+    }
+
+    # Serve content normally (no redirect yet)
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+
+# Additional port 8080 for WebSocket (HTTP only before SSL)
+server {
+    listen 8080;
+    listen [::]:8080;
+    server_name $domain;
+
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOFNGINX
+}
+
+create_nginx_config_with_ssl() {
+    local domain=$1
+    
+    # Create full NGINX configuration with SSL support
     cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
 # HTTP Server - Redirect to HTTPS and handle ACME challenge
 server {
@@ -741,15 +817,6 @@ server {
     }
 }
 EOFNGINX
-    
-    # Test NGINX configuration
-    nginx -t > /dev/null 2>&1 || {
-        print_error "NGINX configuration test failed"
-        return 1
-    }
-    
-    print_success "Domain configured"
-    return 0
 }
 
 install_ssl() {
@@ -760,24 +827,24 @@ install_ssl() {
     # Create web root
     mkdir -p /var/www/html
     
-    # Stop NGINX temporarily
-    systemctl stop nginx
-    
-    # Obtain certificate
-    # Note: For production use, consider providing an email address with -m or --email flag
-    # This allows Let's Encrypt to send important notifications about certificate expiration
-    certbot certonly --standalone -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --staple-ocsp || {
+    # Obtain certificate using webroot method
+    # This doesn't require stopping NGINX and works with the ACME challenge location
+    certbot certonly --webroot -w /var/www/html -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --staple-ocsp || {
         print_error "Failed to obtain SSL certificate"
-        systemctl start nginx
         return 1
     }
     
-    # Setup auto-renewal
-    (crontab -l 2>/dev/null; echo "0 0 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+    # Setup auto-renewal (check if already exists to avoid duplicates)
+    local renewal_cron="0 0 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'"
+    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+        (crontab -l 2>/dev/null; echo "$renewal_cron") | crontab -
+    fi
     
-    # Restart NGINX
-    systemctl start nginx
-    systemctl reload nginx
+    # Update NGINX config to use SSL
+    create_nginx_config_with_ssl "$domain"
+    
+    # Test and reload NGINX
+    nginx -t > /dev/null 2>&1 && systemctl reload nginx
     
     print_success "SSL certificate installed and auto-renewal configured"
 }
@@ -1525,23 +1592,94 @@ configure_domain() {
     # Save domain
     echo "$domain" > "$DOMAIN_FILE"
     
-    # Create NGINX configuration
+    # Check if SSL certificate already exists
+    if [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]]; then
+        # SSL exists, create full config with HTTPS
+        create_nginx_config_with_ssl "$domain"
+    else
+        # SSL doesn't exist, create HTTP-only config for ACME challenge
+        create_nginx_config_http_only "$domain"
+    fi
+    
+    nginx -t && systemctl reload nginx
+    echo "Domain configured successfully"
+}
+
+create_nginx_config_http_only() {
+    local domain=$1
+    
+    # Create HTTP-only NGINX configuration for ACME challenge
     cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
+# HTTP Server - Handle ACME challenge and serve content
 server {
     listen 80;
     listen [::]:80;
     server_name $domain;
 
+    # Root directory
+    root /var/www/html;
+    index index.html index.htm;
+
+    # ACME challenge for Let's Encrypt
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
         allow all;
     }
 
+    # Serve content normally (no redirect yet)
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+
+# Additional port 8080 for WebSocket (HTTP only before SSL)
+server {
+    listen 8080;
+    listen [::]:8080;
+    server_name $domain;
+
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOFNGINX
+}
+
+create_nginx_config_with_ssl() {
+    local domain=$1
+    
+    # Create full NGINX configuration with SSL support
+    cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
+# HTTP Server - Redirect to HTTPS and handle ACME challenge
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain;
+
+    # ACME challenge for Let's Encrypt
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        allow all;
+    }
+
+    # Redirect all other HTTP traffic to HTTPS
     location / {
         return 301 https://\$host\$request_uri;
     }
 }
 
+# HTTPS Server with WebSocket support
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
@@ -1549,6 +1687,7 @@ server {
     listen [::]:8443 ssl http2;
     server_name $domain;
 
+    # SSL Configuration
     ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -1595,6 +1734,7 @@ server {
     }
 }
 
+# Additional port 8080 for WebSocket
 server {
     listen 8080;
     listen [::]:8080;
@@ -1615,9 +1755,6 @@ server {
     }
 }
 EOFNGINX
-    
-    nginx -t && systemctl reload nginx
-    echo "Domain configured successfully"
 }
 
 install_ssl() {
@@ -1627,18 +1764,23 @@ install_ssl() {
     
     mkdir -p /var/www/html
     
-    systemctl stop nginx
-    
-    certbot certonly --standalone -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --staple-ocsp || {
+    # Obtain certificate using webroot method
+    certbot certonly --webroot -w /var/www/html -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --staple-ocsp || {
         echo "Failed to obtain SSL certificate"
-        systemctl start nginx
         return 1
+    }
+    
+    # Setup auto-renewal (check if already exists to avoid duplicates)
+    local renewal_cron="0 0 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'"
+    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+        (crontab -l 2>/dev/null; echo "$renewal_cron") | crontab -
     fi
     
-    (crontab -l 2>/dev/null; echo "0 0 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+    # Update NGINX config to use SSL
+    create_nginx_config_with_ssl "$domain"
     
-    systemctl start nginx
-    systemctl reload nginx
+    # Test and reload NGINX
+    nginx -t && systemctl reload nginx
     
     echo "SSL certificate installed"
 }
