@@ -413,11 +413,14 @@ sudo systemctl daemon-reload
 # Check if port 80 is open
 sudo netstat -tuln | grep :80
 
-# Manually obtain certificate
-sudo certbot certonly --standalone -d your-domain.com
+# Make sure NGINX is running
+sudo systemctl status nginx
 
-# Restart NGINX
-sudo systemctl restart nginx
+# Manually obtain certificate using webroot method
+sudo certbot certonly --webroot -w /var/www/html -d your-domain.com
+
+# Reload NGINX
+sudo systemctl reload nginx
 ```
 
 **2. Service Not Starting**
