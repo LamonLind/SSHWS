@@ -644,7 +644,7 @@ create_nginx_config_http_only() {
     
     # Create HTTP-only NGINX configuration for ACME challenge
     cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
-# HTTP Server - Handle ACME challenge and serve content
+# HTTP Server - Handle ACME challenge and WebSocket on port 80
 server {
     listen 80;
     listen [::]:80;
@@ -658,6 +658,49 @@ server {
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
         allow all;
+    }
+
+    # SSH-WS WebSocket endpoint on port 80
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    # V2Ray endpoints on port 80
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     # Serve content normally (no redirect yet)
@@ -678,9 +721,33 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_connect_timeout 7d;
         proxy_send_timeout 7d;
         proxy_read_timeout 7d;
+    }
+
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     location / {
@@ -705,6 +772,43 @@ server {
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
         allow all;
+    }
+
+    # SSH-WS WebSocket endpoint on port 80 (works even without SSL)
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    # V2Ray endpoints on port 80 (works even without SSL for testing)
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     # Redirect all other HTTP traffic to HTTPS
@@ -1532,6 +1636,17 @@ update_script() {
 
 uninstall_all() {
     echo "=== Uninstall Everything ==="
+    echo ""
+    echo "This will completely remove:"
+    echo "  - All services (SSHWS, V2Ray, XHTTP)"
+    echo "  - All configurations"
+    echo "  - All user data"
+    echo "  - NGINX configuration for SSHWS"
+    echo "  - Management scripts"
+    echo "  - V2Ray binary (optional)"
+    echo "  - SSL certificates (optional)"
+    echo "  - NGINX package (optional)"
+    echo ""
     read -p "Are you sure you want to uninstall everything? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
@@ -1539,11 +1654,17 @@ uninstall_all() {
         return 0
     fi
     
-    echo "Stopping services..."
-    systemctl stop nginx sshws v2ray-vmess v2ray-vless xhttp
-    systemctl disable nginx sshws v2ray-vmess v2ray-vless xhttp
+    echo ""
+    read -p "Remove V2Ray binary? (yes/no): " remove_v2ray
+    read -p "Remove SSL certificates? (yes/no): " remove_ssl
+    read -p "Remove NGINX package? (yes/no): " remove_nginx
     
-    echo "Removing services..."
+    echo ""
+    echo "Stopping services..."
+    systemctl stop nginx sshws v2ray-vmess v2ray-vless xhttp 2>/dev/null || true
+    systemctl disable nginx sshws v2ray-vmess v2ray-vless xhttp 2>/dev/null || true
+    
+    echo "Removing systemd services..."
     rm -f /etc/systemd/system/sshws.service
     rm -f /etc/systemd/system/v2ray-vmess.service
     rm -f /etc/systemd/system/v2ray-vless.service
@@ -1555,17 +1676,78 @@ uninstall_all() {
     rm -rf /etc/xhttp
     rm -rf /var/lib/sshws
     rm -rf /var/log/sshws
+    rm -rf /var/log/v2ray
+    rm -rf /var/log/xhttp
     rm -f /etc/nginx/conf.d/sshws.conf
     
     echo "Removing scripts..."
     rm -f /usr/local/bin/sshws-menu
     rm -rf /usr/local/lib/sshws
     
+    echo "Removing Python dependencies..."
+    pip3 uninstall -y websockets 2>/dev/null || true
+    
+    # Remove V2Ray binary if requested
+    if [[ "$remove_v2ray" == "yes" ]]; then
+        echo "Removing V2Ray binary..."
+        rm -f /usr/local/bin/v2ray
+        rm -f /usr/local/bin/v2ctl
+        rm -rf /usr/local/share/v2ray
+        rm -f /etc/systemd/system/v2ray.service
+        rm -f /etc/systemd/system/v2ray@.service
+    fi
+    
+    # Remove SSL certificates if requested
+    if [[ "$remove_ssl" == "yes" ]]; then
+        echo "Removing SSL certificates..."
+        # Remove certbot cron jobs created by this script
+        crontab -l 2>/dev/null | grep -v "certbot renew --quiet --deploy-hook 'systemctl reload nginx'" | crontab - 2>/dev/null || true
+        # Remove certificates
+        rm -rf /etc/letsencrypt
+        rm -rf /var/lib/letsencrypt
+        rm -rf /var/log/letsencrypt
+    fi
+    
+    # Remove NGINX if requested
+    if [[ "$remove_nginx" == "yes" ]]; then
+        echo "Removing NGINX package..."
+        systemctl stop nginx 2>/dev/null || true
+        systemctl disable nginx 2>/dev/null || true
+        apt-get remove -y nginx nginx-common 2>/dev/null || true
+        apt-get purge -y nginx nginx-common 2>/dev/null || true
+        apt-get autoremove -y 2>/dev/null || true
+        rm -rf /etc/nginx
+        rm -rf /var/log/nginx
+        rm -rf /var/www/html
+    fi
+    
+    # Clean up firewall rules
+    echo "Cleaning up firewall rules..."
+    ufw delete allow 8080/tcp 2>/dev/null || true
+    ufw delete allow 8443/tcp 2>/dev/null || true
+    ufw delete allow 2087/tcp 2>/dev/null || true
+    
+    # Reload systemd
     systemctl daemon-reload
     
-    echo "Uninstall completed"
-    echo "Note: NGINX, V2Ray binary, and SSL certificates were not removed"
-    echo "You can remove them manually if needed"
+    echo ""
+    echo "═══════════════════════════════════════════════════════"
+    echo "Uninstall completed successfully!"
+    echo "═══════════════════════════════════════════════════════"
+    echo ""
+    if [[ "$remove_v2ray" != "yes" ]]; then
+        echo "Note: V2Ray binary was not removed"
+        echo "  To remove manually: rm -f /usr/local/bin/v2ray /usr/local/bin/v2ctl"
+    fi
+    if [[ "$remove_ssl" != "yes" ]]; then
+        echo "Note: SSL certificates were not removed"
+        echo "  To remove manually: rm -rf /etc/letsencrypt"
+    fi
+    if [[ "$remove_nginx" != "yes" ]]; then
+        echo "Note: NGINX package was not removed"
+        echo "  To remove manually: apt-get purge nginx nginx-common"
+    fi
+    echo ""
 }
 EOFFUNC
     
@@ -1610,7 +1792,7 @@ create_nginx_config_http_only() {
     
     # Create HTTP-only NGINX configuration for ACME challenge
     cat > "$NGINX_CONF_DIR/sshws.conf" << EOFNGINX
-# HTTP Server - Handle ACME challenge and serve content
+# HTTP Server - Handle ACME challenge and WebSocket on port 80
 server {
     listen 80;
     listen [::]:80;
@@ -1624,6 +1806,49 @@ server {
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
         allow all;
+    }
+
+    # SSH-WS WebSocket endpoint on port 80
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    # V2Ray endpoints on port 80
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     # Serve content normally (no redirect yet)
@@ -1644,9 +1869,33 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_connect_timeout 7d;
         proxy_send_timeout 7d;
         proxy_read_timeout 7d;
+    }
+
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     location / {
@@ -1671,6 +1920,43 @@ server {
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
         allow all;
+    }
+
+    # SSH-WS WebSocket endpoint on port 80 (works even without SSL)
+    location /ssh-ws {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+    }
+
+    # V2Ray endpoints on port 80 (works even without SSL for testing)
+    location /vmess {
+        proxy_pass http://127.0.0.1:10001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /vless {
+        proxy_pass http://127.0.0.1:10002;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+
+    location /xhttp {
+        proxy_pass http://127.0.0.1:10003;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
     }
 
     # Redirect all other HTTP traffic to HTTPS
