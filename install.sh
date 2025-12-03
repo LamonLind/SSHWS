@@ -1700,8 +1700,8 @@ uninstall_all() {
     # Remove SSL certificates if requested
     if [[ "$remove_ssl" == "yes" ]]; then
         echo "Removing SSL certificates..."
-        # Remove certbot cron jobs
-        crontab -l 2>/dev/null | grep -v "certbot renew" | crontab - 2>/dev/null || true
+        # Remove certbot cron jobs created by this script
+        crontab -l 2>/dev/null | grep -v "certbot renew --quiet --deploy-hook 'systemctl reload nginx'" | crontab - 2>/dev/null || true
         # Remove certificates
         rm -rf /etc/letsencrypt
         rm -rf /var/lib/letsencrypt
