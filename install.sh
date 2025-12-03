@@ -83,9 +83,9 @@ detect_os() {
     print_msg "Detecting operating system..."
     
     if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        OS=$ID
-        OS_VERSION=$VERSION_ID
+        # Safely parse OS information without sourcing the file
+        OS=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"')
+        OS_VERSION=$(grep "^VERSION_ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"')
     else
         print_error "Cannot detect operating system"
         exit 1
@@ -136,7 +136,7 @@ EOF
 
 update_system() {
     print_msg "Updating system packages..."
-    apt-get update -qq
+    apt-get update -q
     print_success "System updated"
 }
 
@@ -382,8 +382,22 @@ EOF
 install_v2ray() {
     print_msg "Installing V2Ray..."
     
-    # Download and install V2Ray
-    bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) > /dev/null 2>&1
+    # Download V2Ray installation script with verification
+    local v2ray_script="/tmp/v2ray-install.sh"
+    if ! curl -L -o "$v2ray_script" https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh; then
+        print_error "Failed to download V2Ray installation script"
+        return 1
+    fi
+    
+    # Execute the script
+    bash "$v2ray_script" > /dev/null 2>&1 || {
+        print_error "V2Ray installation failed"
+        rm -f "$v2ray_script"
+        return 1
+    }
+    
+    # Clean up
+    rm -f "$v2ray_script"
     
     # Create V2Ray VMESS config
     cat > "$V2RAY_DIR/vmess-config.json" << 'EOF'
@@ -729,6 +743,8 @@ install_ssl() {
     systemctl stop nginx
     
     # Obtain certificate
+    # Note: For production use, consider providing an email address with -m or --email flag
+    # This allows Let's Encrypt to send important notifications about certificate expiration
     certbot certonly --standalone -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --staple-ocsp || {
         print_error "Failed to obtain SSL certificate"
         systemctl start nginx
@@ -999,14 +1015,30 @@ create_v2ray_user() {
     
     # Add user to config
     local temp_file=$(mktemp)
+    local jq_success=0
+    
     if [[ "$protocol" == "vmess" ]]; then
-        jq --arg id "$uuid" --arg email "$username" \
+        if jq --arg id "$uuid" --arg email "$username" \
             '.inbounds[0].settings.clients += [{"id": $id, "alterId": 0, "email": $email}]' \
-            "$config_file" > "$temp_file" && mv "$temp_file" "$config_file"
+            "$config_file" > "$temp_file"; then
+            mv "$temp_file" "$config_file"
+            jq_success=1
+        fi
     else
-        jq --arg id "$uuid" --arg email "$username" \
+        if jq --arg id "$uuid" --arg email "$username" \
             '.inbounds[0].settings.clients += [{"id": $id, "email": $email}]' \
-            "$config_file" > "$temp_file" && mv "$temp_file" "$config_file"
+            "$config_file" > "$temp_file"; then
+            mv "$temp_file" "$config_file"
+            jq_success=1
+        fi
+    fi
+    
+    # Clean up temp file if jq failed
+    [[ -f "$temp_file" ]] && rm -f "$temp_file"
+    
+    if [[ $jq_success -eq 0 ]]; then
+        echo "Failed to add user to configuration"
+        return 1
     fi
     
     # Restart service
@@ -1094,9 +1126,19 @@ create_xhttp_user() {
     # Add user to config
     local config_file="$XHTTP_DIR/config.json"
     local temp_file=$(mktemp)
-    jq --arg id "$uuid" --arg email "$username" \
+    
+    if jq --arg id "$uuid" --arg email "$username" \
         '.inbounds[0].settings.clients += [{"id": $id, "email": $email}]' \
-        "$config_file" > "$temp_file" && mv "$temp_file" "$config_file"
+        "$config_file" > "$temp_file"; then
+        mv "$temp_file" "$config_file"
+    else
+        rm -f "$temp_file"
+        echo "Failed to add user to configuration"
+        return 1
+    fi
+    
+    # Clean up temp file if it still exists
+    [[ -f "$temp_file" ]] && rm -f "$temp_file"
     
     # Restart service
     systemctl restart xhttp
@@ -1248,22 +1290,31 @@ delete_user() {
             userdel -r "$username" 2>/dev/null
             ;;
         vmess)
-            jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
-                "$V2RAY_DIR/vmess-config.json" > /tmp/vmess.tmp && \
-                mv /tmp/vmess.tmp "$V2RAY_DIR/vmess-config.json"
-            systemctl restart v2ray-vmess
+            local tmp_file=$(mktemp)
+            if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
+                "$V2RAY_DIR/vmess-config.json" > "$tmp_file"; then
+                mv "$tmp_file" "$V2RAY_DIR/vmess-config.json"
+                systemctl restart v2ray-vmess
+            fi
+            rm -f "$tmp_file"
             ;;
         vless)
-            jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
-                "$V2RAY_DIR/vless-config.json" > /tmp/vless.tmp && \
-                mv /tmp/vless.tmp "$V2RAY_DIR/vless-config.json"
-            systemctl restart v2ray-vless
+            local tmp_file=$(mktemp)
+            if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
+                "$V2RAY_DIR/vless-config.json" > "$tmp_file"; then
+                mv "$tmp_file" "$V2RAY_DIR/vless-config.json"
+                systemctl restart v2ray-vless
+            fi
+            rm -f "$tmp_file"
             ;;
         xhttp)
-            jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
-                "$XHTTP_DIR/config.json" > /tmp/xhttp.tmp && \
-                mv /tmp/xhttp.tmp "$XHTTP_DIR/config.json"
-            systemctl restart xhttp
+            local tmp_file=$(mktemp)
+            if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
+                "$XHTTP_DIR/config.json" > "$tmp_file"; then
+                mv "$tmp_file" "$XHTTP_DIR/config.json"
+                systemctl restart xhttp
+            fi
+            rm -f "$tmp_file"
             ;;
     esac
     
