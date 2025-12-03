@@ -41,6 +41,23 @@ USERS_DB="$DATA_DIR/users.db"
 DOMAIN_FILE="$DATA_DIR/domain.txt"
 CONFIG_FILE="$DATA_DIR/config.conf"
 
+# Temporary files array for cleanup
+declare -a TEMP_FILES=()
+
+#############################################
+# Cleanup Functions
+#############################################
+
+cleanup_temp_files() {
+    # Clean up any temporary files
+    for temp_file in "${TEMP_FILES[@]}"; do
+        [[ -f "$temp_file" ]] && rm -f "$temp_file"
+    done
+}
+
+# Set trap for cleanup on exit
+trap cleanup_temp_files EXIT INT TERM
+
 #############################################
 # Utility Functions
 #############################################
@@ -136,8 +153,12 @@ EOF
 
 update_system() {
     print_msg "Updating system packages..."
-    apt-get update -q
-    print_success "System updated"
+    if ! apt-get update -q; then
+        print_error "Failed to update package lists"
+        print_warning "Continuing anyway, but some packages may not install correctly"
+    else
+        print_success "System updated"
+    fi
 }
 
 install_dependencies() {
@@ -1015,6 +1036,7 @@ create_v2ray_user() {
     
     # Add user to config
     local temp_file=$(mktemp)
+    TEMP_FILES+=("$temp_file")
     local jq_success=0
     
     if [[ "$protocol" == "vmess" ]]; then
@@ -1126,6 +1148,7 @@ create_xhttp_user() {
     # Add user to config
     local config_file="$XHTTP_DIR/config.json"
     local temp_file=$(mktemp)
+    TEMP_FILES+=("$temp_file")
     
     if jq --arg id "$uuid" --arg email "$username" \
         '.inbounds[0].settings.clients += [{"id": $id, "email": $email}]' \
@@ -1291,6 +1314,7 @@ delete_user() {
             ;;
         vmess)
             local tmp_file=$(mktemp)
+            TEMP_FILES+=("$tmp_file")
             if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
                 "$V2RAY_DIR/vmess-config.json" > "$tmp_file"; then
                 mv "$tmp_file" "$V2RAY_DIR/vmess-config.json"
@@ -1300,6 +1324,7 @@ delete_user() {
             ;;
         vless)
             local tmp_file=$(mktemp)
+            TEMP_FILES+=("$tmp_file")
             if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
                 "$V2RAY_DIR/vless-config.json" > "$tmp_file"; then
                 mv "$tmp_file" "$V2RAY_DIR/vless-config.json"
@@ -1309,6 +1334,7 @@ delete_user() {
             ;;
         xhttp)
             local tmp_file=$(mktemp)
+            TEMP_FILES+=("$tmp_file")
             if jq --arg id "$uuid" 'del(.inbounds[0].settings.clients[] | select(.id == $id))' \
                 "$XHTTP_DIR/config.json" > "$tmp_file"; then
                 mv "$tmp_file" "$XHTTP_DIR/config.json"
